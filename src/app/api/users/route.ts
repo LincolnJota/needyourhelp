@@ -1,6 +1,4 @@
-import { NextRequest, NextResponse } from 'next/server'
-import { addUser, removeUser, getConnectedUsers } from '../../../stores/usersStore';
-import Pusher from 'pusher'
+import { getConnectedUsers } from '../../../stores/usersStore';
 
 export async function GET() {
 

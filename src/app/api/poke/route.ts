@@ -1,5 +1,4 @@
-import { NextRequest, NextResponse } from 'next/server'
-import { addUser, removeUser, getConnectedUsers } from '../../../stores/usersStore';
+import { NextRequest } from 'next/server'
 import Pusher from 'pusher'
 
 const pusher = new Pusher({

@@ -8,7 +8,6 @@ import {
   DialogContent,
   DialogDescription,
   DialogFooter,
-  DialogHeader,
   DialogTitle,
   DialogTrigger,
 } from "@/components/ui/dialog";
@@ -83,7 +82,7 @@ export default function Home() {
         setConnectedUsers(data.users);
       });
 
-      channel.bind("user-disconnected", (data: any) => {
+      channel.bind("user-disconnected", (data: { users: User[] }) => {
         console.log("Usuário desconectado (PUSHER):", data);
 
         const updatedUsers = data.users.filter(
@@ -92,7 +91,7 @@ export default function Home() {
         setConnectedUsers(updatedUsers);
       });
 
-      channel.bind("poke-received", (data: any) => {
+      channel.bind("poke-received", (data: { fromName: string, to: string, from: string }) => {
         const myEmail = localStorage.getItem("userEmail");
 
         if (data.to.includes(myEmail!)) {
