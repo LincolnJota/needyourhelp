@@ -158,7 +158,7 @@ export default function LoginDialog() {
               {/* Botão de Editar */}
               <button
                 type="button"
-                className="absolute text-white top-1/2 left-1/2 transform -translate-x-1/2 -translate-y-1/2 p-2 bg-[#325036] opacity-90 rounded-full"
+                className="absolute text-white top-1/2 left-1/2 transform -translate-x-1/2 -translate-y-1/2 p-2 bg-[#325036] opacity-50 rounded-full focus-visible:ring-0 focus-visible:ring-transparent focus-visible:ring-offset-0"
                 onClick={() => {
                   setAvatarEditing(true);
                 }}
