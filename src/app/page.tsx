@@ -1,246 +1,290 @@
 "use client";
 
-import { useState, useEffect } from "react";
-import Pusher from "pusher-js";
-import { IconUser } from "@tabler/icons-react";
-import {
-  Dialog,
-  DialogContent,
-  DialogDescription,
-  DialogFooter,
-  DialogTitle,
-  DialogTrigger,
-} from "@/components/ui/dialog";
-import { User } from "@/stores/usersStore";
+import { useEffect, useState } from "react";
+import Pusher, { Channel } from "pusher-js";
+import LoginDialog from "@/components/my/login_dialog";
+import useAuthStore from "@/stores/authStore";
 import { toast, ToastContainer } from "react-toastify";
+import SendNotificationButton from "@/components/my/send_notification_button";
+import Avatar, { AvatarFullConfig } from "react-nice-avatar";
+import dynamic from "next/dynamic";
+import { IconSettings } from "@tabler/icons-react";
+import SettingsDialog from "@/components/my/settings_dialog";
+import { AnimatePresence, motion } from "motion/react";
 
-export default function Home() {
-  const [email, setEmail] = useState<string | null>(null);
-  const [name, setName] = useState<string | null>(null);
-  const [connectedUsers, setConnectedUsers] = useState<User[]>([]);
-  const [isUserSet, setIsUserSet] = useState(false);
+const GridLoader = dynamic(() => import("react-spinners/GridLoader"), {
+  ssr: false,
+});
 
-  // Função para enviar dados do usuário para o servidor usando navigator.sendBeacon
-  const sendUserInfoToServer = (email: string, name: string, event: string) => {
-    const url = "/api/socket";
-    const data = JSON.stringify({ email, name, event });
+export default function TestePage() {
+  const [channel, setChannel] = useState<Channel | null>(null);
+  const [loading, setLoading] = useState<boolean>(true);
+  const [openSettings, setOpenSettings] = useState<boolean>(false);
+  const authStore = useAuthStore();
+  const [connectedUsers, setConnectedUsers] = useState<
+    Map<string, { email: string; name: string; avatar: AvatarFullConfig }>
+  >(new Map());
 
-    // Verificar se a API beacon está disponível
-    if (navigator.sendBeacon) {
-      navigator.sendBeacon(url, data);
-    } else {
-      // Fallback para fetch caso o beacon não esteja disponível
-      fetch(url, {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
+  useEffect(() => {
+    if (!authStore.isLoggedIn) {
+      return;
+    }
+
+    if ("serviceWorker" in navigator) {
+      navigator.serviceWorker
+        .register("/sw.js")
+        .then((registration) => {
+          console.log("Service Worker registrado com sucesso:", registration);
+        })
+        .catch((error) => {
+          console.log("Falha ao registrar o Service Worker:", error);
+        });
+    }
+
+    const { email, name } = authStore.user!;
+    const { avatar } = authStore;
+
+    const pusher = new Pusher(process.env.NEXT_PUBLIC_PUSHER_KEY!, {
+      cluster: process.env.NEXT_PUBLIC_PUSHER_CLUSTER!,
+      channelAuthorization: {
+        endpoint: "/api/channel",
+        transport: "ajax",
+        params: {
+          email,
+          name,
+          avatar: JSON.stringify(avatar),
         },
-        body: data,
-      });
-    }
-  };
-
-  useEffect(() => {
-    const storedEmail = localStorage.getItem("userEmail");
-    const storedName = localStorage.getItem("userName");
-    if (storedEmail && storedName) {
-      setEmail(storedEmail);
-      setName(storedName);
-      setIsUserSet(true);
-      sendUserInfoToServer(storedEmail, storedName, "connect"); // Envia o evento de conexão para o servidor
-    }
-
-    // Fetch para buscar usuários conectados ao iniciar a página
-    const fetchConnectedUsers = async () => {
-      try {
-        const response = await fetch("/api/users");
-        const data = await response.json();
-        setConnectedUsers((prevUsers) => [
-          ...prevUsers,
-          ...data.users.filter((user: User) => user.email !== storedEmail),
-        ]);
-      } catch (error) {
-        console.error("Erro ao buscar usuários conectados:", error);
-      }
-    };
-
-    fetchConnectedUsers(); // Chama a função para buscar usuários conectados
-  }, []);
-
-  useEffect(() => {
-    if (email && name) {
-      const pusher = new Pusher("96e5da380a39b336f2a0", {
-        cluster: "us2",
-      });
-
-      const channel = pusher.subscribe("my-channel");
-
-      // Conectar o usuário e escutar outros eventos de usuários conectados
-      channel.bind("user-connected", (data: { users: User[] }) => {
-        console.log("Atualizando usuários (PUSHER):", data.users);
-
-        setConnectedUsers(data.users);
-      });
-
-      channel.bind("user-disconnected", (data: { users: User[] }) => {
-        console.log("Usuário desconectado (PUSHER):", data);
-
-        const updatedUsers = data.users.filter(
-          (user: User) => user.email !== email
-        );
-        setConnectedUsers(updatedUsers);
-      });
-
-      channel.bind("poke-received", (data: { fromName: string, to: string, from: string }) => {
-        const myEmail = localStorage.getItem("userEmail");
-
-        if (data.to.includes(myEmail!)) {
-          console.log("Notificação recebida (PUSHER):", data);
-          toast.warn(data.fromName + " está te chamando!", {
-            position: "top-center",
-            autoClose: 5000,
-            hideProgressBar: false,
-            closeOnClick: false,
-            pauseOnHover: true,
-            draggable: true,
-            progress: undefined,
-            theme: "colored",
-          });
-          new Audio("/poke.mp3").play();
-        }
-      });
-
-      // Usar o Beacon para notificar o servidor de desconexão
-      const handleBeforeUnload = () => {
-        sendUserInfoToServer(email, name!, "disconnect");
-      };
-
-      const handleUnload = () => {
-        sendUserInfoToServer(email, name!, "disconnect");
-      };
-
-      window.addEventListener("beforeunload", handleBeforeUnload);
-      window.addEventListener("unload", handleUnload);
-
-      return () => {
-        window.removeEventListener("beforeunload", handleBeforeUnload);
-        window.removeEventListener("unload", handleUnload);
-      };
-    }
-  }, [email, name]);
-
-  const sendNotification = (email: string) => {
-    const from = localStorage.getItem("userEmail");
-    const fromName = localStorage.getItem("userName");
-    console.log("Enviando notificação para: ", email);
-
-    // enviar para o fetch
-    fetch("/api/poke", {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/json",
       },
-      body: JSON.stringify({ from: from, to: email, fromName: fromName }),
+      userAuthentication: {
+        endpoint: "/api/pusher",
+        transport: "ajax",
+        params: {
+          email,
+          name,
+          avatar: JSON.stringify(avatar),
+        },
+      },
+    });
+
+    pusher.signin();
+
+    const channel = pusher.subscribe("presence-cutucar");
+    setChannel(channel);
+
+    /* eslint-disable @typescript-eslint/no-explicit-any */
+    channel.bind("pusher:subscription_succeeded", (members: any) => {
+      const usersMap = new Map();
+      members.each((member: any) => {
+        const { email, name, avatar } = member.info;
+        const avatarParsed = JSON.parse(avatar);
+
+        usersMap.set(email, {
+          email,
+          name,
+          avatar: avatarParsed as AvatarFullConfig,
+        });
+      });
+
+      setConnectedUsers(usersMap);
+
+      const { email, name } = authStore.user!;
+
+      if (usersMap.has(email)) {
+        const existingUser = usersMap.get(email);
+
+        if (existingUser.name !== name) {
+          authStore.logout();
+          toast.error("Usuário já logado!");
+        }
+      }
+      setLoading(false);
+    });
+
+    /* eslint-disable @typescript-eslint/no-explicit-any */
+    channel.bind("pusher:member_added", (member: any) => {
+      setConnectedUsers(
+        (
+          prevUsersMap: Map<
+            string,
+            { email: string; name: string; avatar: AvatarFullConfig }
+          >
+        ) => {
+          const updatedMap = new Map(prevUsersMap);
+          const { email, name, avatar } = member.info;
+          const avatarParsed = JSON.parse(avatar);
+
+          updatedMap.set(email, { email, name, avatar: avatarParsed });
+          return updatedMap;
+        }
+      );
+    });
+
+    /* eslint-disable @typescript-eslint/no-explicit-any */
+    channel.bind("pusher:member_removed", (member: any) => {
+      console.log("Usuário desconectado:", member);
+
+      setConnectedUsers(
+        (
+          prevUsersMap: Map<
+            string,
+            { email: string; name: string; avatar: AvatarFullConfig }
+          >
+        ) => {
+          prevUsersMap.delete(member.info.email);
+          return new Map(prevUsersMap);
+        }
+      );
+    });
+
+    /* eslint-disable @typescript-eslint/no-explicit-any */
+    channel.bind("client-cutucar", (data: any) => {
+      if (data.to !== email) return;
+
+      if (Notification.permission === "granted") {
+        navigator.serviceWorker.ready
+          .then((registration) => {
+            registration.showNotification(
+              data.fromName + " está te chamando!",
+              {
+                body: "teste",
+                icon: "/assovio.png",
+              }
+            );
+          })
+          .catch(() => {
+            console.log("erro ao enviar msg");
+          });
+      } else {
+        Notification.requestPermission().then(function (getperm) {
+          console.log("Perm granted", getperm);
+        });
+        toast.dismiss();
+        toast.warn(data.fromName + " está te chamando!");
+      }
+
+      if (authStore.sound == "tts") {
+        if ("speechSynthesis" in window) {
+          const utterance = new SpeechSynthesisUtterance(
+            data.fromName + " está te chamando!"
+          );
+          utterance.lang = "pt-BR"; // Definir o idioma para português
+          utterance.rate = 1.5; // Velocidade normal
+          utterance.pitch = 1; // Tom normal
+          speechSynthesis.speak(utterance);
+        }
+      }
+
+      const hsound = new Howl({
+        src: [`/${authStore.sound}`], // Usa o valor atualizado
+        preload: true,
+        volume: 1.0,
+      });
+
+      hsound.play();
+    });
+
+    return () => {
+      pusher.disconnect();
+    };
+  }, [authStore]); // cuidado aqui, ficava u user e o sound.
+
+  const sendNotification = async (to: string) => {
+    const { email, name } = authStore.user!;
+
+    channel?.trigger("client-cutucar", {
+      from: email,
+      fromName: name,
+      to,
     });
   };
 
-  return (
-    <main className="min-h-dvh flex flex-col items-center justify-center bg-[#fff8f1]">
-      <Dialog open={!isUserSet}>
-        <DialogTrigger className="hidden"></DialogTrigger>
-        <DialogContent className="w-[90%] md:w-[20%]">
-          <DialogTitle>Suas informações</DialogTitle>
-          <DialogDescription>
-            Por favor, digite o seu nome e e-mail para completar a conexão.
-          </DialogDescription>
-          <form
-            className="flex flex-col gap-2"
-            onSubmit={(e) => {
-              e.preventDefault();
-              if (email && name) {
-                localStorage.setItem("userEmail", email);
-                localStorage.setItem("userName", name); // Salva o nome junto ao e-mail
-                setIsUserSet(true);
-                sendUserInfoToServer(email, name, "connect");
-              }
-              //setShowDialog(false);
-            }}
-          >
-            <input
-              type="text"
-              placeholder="Seu nome"
-              value={name ?? ""}
-              onChange={(e) => setName(e.target.value)}
-              className="p-2 border-2 border-[#382a00] rounded-lg w-full"
-              required
-            />
-            <input
-              type="email"
-              placeholder="Seu email"
-              value={email ?? ""}
-              onChange={(e) => setEmail(e.target.value)}
-              className="p-2 border-2 border-[#382a00] rounded-lg w-full"
-              required
-            />
-            <DialogFooter>
-              <button
-                type="submit"
-                className="px-4 py-2 bg-[#325036] text-white rounded-lg mt-2"
-              >
-                Conectar
-              </button>
-            </DialogFooter>
-          </form>
-        </DialogContent>
-      </Dialog>
+  if (loading) {
+    return (
+      <main className="min-h-dvh flex flex-col items-center justify-center bg-[#fff8f1]">
+        <GridLoader color="#382a00" />
+        <LoginDialog />
+      </main>
+    );
+  }
 
-      <div className="text-xl my-2 uppercase font-bold">
+  return (
+    <main className="min-h-dvh flex flex-col items-center justify-start bg-[#fff8f1] relative pt-10">
+      <div className="absolute top-4 right-4">
+        <IconSettings
+          onClick={() => {
+            setOpenSettings(true);
+          }}
+          size={30}
+          className="text-[#382a00] hover:animate-spin cursor-pointer hover:scale-110 transition-transform"
+        />
+      </div>
+      <div className="text-xl my-2 uppercase font-bold text-[#382a00] mb-4">
         Usuários Conectados
       </div>
-
-      <div className="flex flex-col gap-4 w-full max-w-lg px-4">
-        {connectedUsers
-          .sort((a, b) => (a.email === email ? -1 : b.email === email ? 1 : 0)) // Ordena o usuário atual para o topo
-          .map((user, index) => (
-            <div
-              key={index}
-              className="flex items-center gap-2 py-2 border-1 border-[#382a00] bg-[#fef9e7] w-full rounded-lg px-2"
-            >
-              <div className="p-3 border-2 bg-[#382a00] rounded-full text-[#ffffff]">
-                <IconUser size={16} />
-              </div>
-              <div className="flex flex-col flex-1">
-                <span className="text-lg text-[#382a00]">{user.name}</span>
-                <span className="text-xs text-[#382a00]">{user.email}</span>
-              </div>
-              {user.email !== email ? (
-                <button
-                  type="button"
-                  onClick={() => sendNotification(user.email)}
-                  className="px-3 text-sm py-2 hover:cursor-pointer hover:scale-105 transition-all bg-[#325036] hover:bg-[#15321a] text-[#ffffff] rounded-lg flex items-center justify-center"
-                >
-                  Chamar
-                </button>
-              ) : (
-                <button
-                  type="button"
-                  onClick={(e) => {
-                    e.preventDefault();
-                    sendUserInfoToServer(email!, name!, "disconnect");
-                    localStorage.removeItem("userEmail");
-                    localStorage.removeItem("userName");
-                    setIsUserSet(false);
-                  }}
-                  className="px-3 text-sm py-2 hover:cursor-pointer hover:scale-105 transition-all bg-[#98000a] hover:bg-[#600004] text-[#ffffff] rounded-lg flex items-center justify-center"
-                >
-                  Sair
-                </button>
-              )}
-            </div>
-          ))}
-      </div>
+      <ul className="flex flex-col gap-4 w-full max-w-lg px-4">
+        <AnimatePresence>
+          {Array.from(connectedUsers.values())
+            .sort((a, b) => {
+              // Coloca o usuário logado no topo
+              if (a.email === authStore.user?.email) return -1;
+              if (b.email === authStore.user?.email) return 1;
+              return 0;
+            })
+            .map((user, index) => (
+              <motion.li
+                key={index}
+                layout
+                initial={{ opacity: 0, scale: 0 }}
+                animate={{ opacity: 1, scale: 1 }}
+                exit={{ opacity: 0, scale: 0 }}
+                transition={{
+                  type: "spring",
+                  stiffness: 300,
+                  damping: 30,
+                }}
+                className="flex items-center gap-2 py-2 border-1 border-[#382a00] bg-[#fef9e7] w-full rounded-lg px-2 justify-between"
+              >
+                <div className="h-12 w-12 border-2 bg-[#382a00] rounded-full text-[#ffffff] flex">
+                  <Avatar className="w-full h-full" {...user.avatar} />
+                </div>
+                <div className="flex flex-col max-w-[55%]">
+                  <div className="text-lg text-[#382a00] min-w-min">
+                    {user.name}
+                  </div>
+                  <div className="text-xs text-[#382a00] opacity-70 overflow-hidden text-ellipsis">
+                    {user.email}
+                  </div>
+                </div>
+                <div className="flex flex-1/10 justify-end">
+                  {user.email !== authStore.user?.email ? (
+                    <SendNotificationButton
+                      onClick={() => sendNotification(user.email)}
+                    />
+                  ) : (
+                    <button
+                      type="button"
+                      onClick={(e) => {
+                        e.preventDefault();
+                        authStore.logout();
+                        setConnectedUsers(new Map());
+                      }}
+                      className="px-3 text-sm py-2 hover:cursor-pointer hover:scale-105 transition-all bg-[#98000a] hover:bg-[#600004] text-[#ffffff] rounded-lg flex items-center justify-center"
+                    >
+                      Sair
+                    </button>
+                  )}
+                </div>
+              </motion.li>
+            ))}
+        </AnimatePresence>
+      </ul>
+      <SettingsDialog
+        open={openSettings}
+        onCloseClick={() => setOpenSettings(false)}
+      />
+      <LoginDialog />
       <ToastContainer
-        position="top-center"
+        position="top-right"
         autoClose={5000}
         hideProgressBar={false}
         newestOnTop={false}
